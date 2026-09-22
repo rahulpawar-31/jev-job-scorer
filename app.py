@@ -22,6 +22,7 @@ import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from flask import Flask, jsonify, render_template, request
 from google import genai
@@ -47,6 +48,23 @@ def redact_pii(text):
     text = EMAIL_RE.sub("[email redacted]", text)
     text = PHONE_RE.sub("[phone redacted]", text)
     return text
+
+
+def extraction_quality_warning(text):
+    """PDF text extraction silently mangles multi-column layouts and unusual
+    fonts -- every downstream Jev/Gemini score inherits that corruption
+    without anyone noticing, per the council review. The text is always
+    shown back in the profile box for review regardless, but flag it
+    explicitly when it looks broken rather than relying on the person to
+    catch it themselves."""
+    if len(text) < 200:
+        return "Extracted text is very short -- this PDF may be a scanned image or mostly non-text. Check it below before fetching."
+    words = text.split()
+    if words:
+        single_char_ratio = sum(1 for w in words if len(w) == 1) / len(words)
+        if single_char_ratio > 0.3:
+            return "Extracted text looks garbled (lots of single-character fragments) -- common with multi-column resumes or unusual fonts. Review it carefully below before fetching."
+    return None
 
 
 if not os.environ.get("TYPESAFE_API_KEY"):
@@ -91,6 +109,21 @@ def daily_gemini_cap_message():
         f"Daily Gemini call budget reached ({DAILY_GEMINI_CALL_CAP} calls used today). "
         "Resets at midnight UTC. Raise DAILY_GEMINI_CALL_CAP in app.py if you want a higher cap."
     )
+
+
+GEMINI_STALE_HOURS = 24  # how long since the last successful Gemini call before this
+# is treated as a persisting degraded state, not a one-off blip -- flagged in the
+# council review: a lapsed key or exhausted quota could otherwise sit silently for
+# days across sessions with no signal beyond that run's own results.
+
+
+def gemini_staleness_hours():
+    """Hours since the last successful Gemini call, or None if there's
+    never been one (fresh install, or GEMINI_API_KEY never actually worked)."""
+    last = store.gemini_last_success()
+    if last is None:
+        return None
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600
 
 
 MATCH_CHECK_LIMIT = 8  # how many top-fit listings get the (slower) Gemini comparison -- kept
@@ -179,7 +212,7 @@ def parse_resume():
     if not text:
         return jsonify({"error": "No extractable text found in that PDF (it may be a scanned image)."}), 400
 
-    return jsonify({"profile_text": text[:MAX_PROFILE_CHARS]})
+    return jsonify({"profile_text": text[:MAX_PROFILE_CHARS], "warning": extraction_quality_warning(text)})
 
 
 @app.route("/fetch", methods=["POST"])
@@ -425,6 +458,7 @@ def fetch():
             "skipped_for_cap": skipped_for_cap,
             "gemini_capped": gemini_capped,
             "usage_today": store.usage_today(),
+            "gemini_stale_hours": gemini_staleness_hours(),
         }
     )
 

@@ -90,6 +90,18 @@ def usage_today():
     return usage
 
 
+def gemini_last_success():
+    """Timestamp of the most recent successful Gemini call, or None if
+    there's never been one. usage_log only ever gets a 'gemini' row after a
+    call actually succeeds (see app.py), so this doubles as "how long has
+    Gemini's fallback been silently degraded" -- a lapsed key or exhausted
+    quota should be visible across sessions, not just within one run's
+    results."""
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT MAX(ts) AS last_ts FROM usage_log WHERE provider = 'gemini'").fetchone()
+        return row["last_ts"] if row and row["last_ts"] else None
+
+
 def profile_hash(profile):
     """Cached scores are only reused while the profile they were scored
     against hasn't changed -- a new resume invalidates old fit scores, but

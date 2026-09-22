@@ -84,6 +84,30 @@
     color: #7a6a3f;
     line-height: 1.4;
   }
+  .extraction-warning {
+    display: none;
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: #fdecea;
+    border: 1px solid #f3c6c0;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--danger);
+    line-height: 1.4;
+  }
+  .gemini-stale-banner {
+    display: none;
+    margin-bottom: 20px;
+    padding: 10px 14px;
+    background: #fdecea;
+    border: 1px solid #f3c6c0;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--danger);
+    line-height: 1.4;
+  }
   #results-card { display: none; }
   .results-grid {
     display: grid;
@@ -192,6 +216,8 @@
   <h1>Job Listing Scorer</h1>
   <p class="sub">Powered by Jev (TypeSafe AI). Scores listings for fit, urgency, and red flags — it never applies or submits anything for you.</p>
 
+  <div id="geminiStaleBanner" class="gemini-stale-banner"></div>
+
   <div class="card">
     <label for="profile">Your target role &amp; key skills</label>
     <div class="hint">e.g. "Backend engineer, 4 years Node.js/TypeScript/Postgres, looking for remote roles at seed-to-series-B startups" &mdash; or upload your resume and it fills this in from your actual role, skills, and experience.</div>
@@ -201,6 +227,7 @@
       <button id="resumeBtn" onclick="uploadResume()" type="button">Use my resume</button>
       <span id="resumeStatus" class="hint"></span>
     </div>
+    <div id="resumeWarning" class="extraction-warning"></div>
     <div class="privacy-note">This text is sent to TypeSafe (Jev) for every listing scored, and to Google (Gemini) for resume comparisons and cover letters &mdash; both external APIs. Email and phone number are automatically redacted before anything is sent; nothing else is.</div>
   </div>
 
@@ -247,6 +274,23 @@ function timeAgo(iso) {
   return `${days}d ago`;
 }
 
+const GEMINI_STALE_HOURS = 24;
+
+function updateGeminiStaleBanner(staleHours) {
+  const banner = document.getElementById('geminiStaleBanner');
+  if (staleHours === null || staleHours === undefined) {
+    banner.textContent = '⚠ Gemini has never successfully verified a listing in this app. Resume-comparison and cover-letter features are unavailable until GEMINI_API_KEY is set and working. Results below use Jev-only fit scores.';
+    banner.style.display = 'block';
+  } else if (staleHours > GEMINI_STALE_HOURS) {
+    const days = Math.floor(staleHours / 24);
+    const label = days >= 1 ? `${days}d` : `${Math.floor(staleHours)}h`;
+    banner.textContent = `⚠ Gemini hasn't successfully verified a listing in over ${label} — this isn't a one-off blip. Check GEMINI_API_KEY and Google's service status. Results are currently falling back to Jev-only scoring.`;
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
 async function uploadResume() {
   const fileInput = document.getElementById('resumeFile');
   const status = document.getElementById('resumeStatus');
@@ -273,7 +317,15 @@ async function uploadResume() {
       return;
     }
     document.getElementById('profile').value = data.profile_text;
-    status.textContent = 'Resume loaded below — edit if you want, then fetch listings.';
+    const warningEl = document.getElementById('resumeWarning');
+    if (data.warning) {
+      warningEl.textContent = '⚠ ' + data.warning;
+      warningEl.style.display = 'block';
+      status.textContent = 'Resume loaded below.';
+    } else {
+      warningEl.style.display = 'none';
+      status.textContent = 'Resume loaded below — review it, edit if you want, then fetch listings.';
+    }
   } catch (e) {
     status.textContent = 'Request failed: ' + e.message;
   } finally {
@@ -391,6 +443,7 @@ async function fetchAndScore() {
       statusMsg += ` Today: ${usage.jev.calls} Jev calls (${usage.jev.tokens.toLocaleString()} tokens), ${usage.gemini.calls} Gemini calls.`;
     }
     status.textContent = statusMsg;
+    updateGeminiStaleBanner(data.gemini_stale_hours);
     resultsCard.style.display = 'block';
   } catch (e) {
     errorEl.textContent = 'Request failed: ' + e.message;

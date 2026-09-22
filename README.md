@@ -9,7 +9,10 @@ you apply yourself.
 
 ## What it does
 
-- **Upload your resume** (PDF) and it extracts your role, skills, and experience automatically
+- **Upload your resume** (PDF) and it extracts your role, skills, and experience automatically —
+  the extracted text is always shown in the profile box for you to review before anything is
+  scored, and flagged explicitly if it looks garbled (common with multi-column layouts) or
+  suspiciously short (a scanned image with no real text layer)
 - **Fetches live listings** from RemoteOK, We Work Remotely, Remotive, Arbeitnow, Jobicy, and any
   Greenhouse/Lever company job board you name — only listings from the last 7 days
 - **Scores every listing with Jev** for fit, seniority match, urgency, and scam/red-flag signals
@@ -18,7 +21,9 @@ you apply yourself.
   the specific requirements your resume actually backs up
 - **Drafts a cover letter** per listing, grounded only in what's actually on your resume
 - Falls back gracefully to Jev's own fit score (clearly labeled "not yet verified") if the resume
-  comparison step is unavailable, instead of hiding everything
+  comparison step is unavailable, instead of hiding everything — and if that fallback has been the
+  case for more than 24 hours (a lapsed key, an exhausted quota), a persistent banner says so
+  instead of it silently becoming the permanent state across sessions
 - **Remembers what you've already seen.** Scores are cached locally (SQLite, `data.db`) per
   resume, so re-running doesn't re-pay for or re-show the same listings. Mark a listing "applied"
   or "not interested" and it's gone for good, regardless of future fetches
