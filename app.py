@@ -34,6 +34,21 @@ from fetch_jobs import fetch_all
 
 MAX_PROFILE_CHARS = 6000
 
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}")
+PHONE_RE = re.compile(r"(?<!\d)(\+?\d[\d\-\s().]{7,}\d)(?!\d)")
+
+
+def redact_pii(text):
+    """This app's profile/resume text is sent to two external APIs (Jev,
+    Gemini) on every run -- that's necessary for scoring, but an email and
+    phone number never are. Strip them before anything leaves the machine.
+    Professional links (GitHub/LinkedIn) are left alone -- a resume puts
+    those there to be shared."""
+    text = EMAIL_RE.sub("[email redacted]", text)
+    text = PHONE_RE.sub("[phone redacted]", text)
+    return text
+
+
 if not os.environ.get("TYPESAFE_API_KEY"):
     sys.exit("Set TYPESAFE_API_KEY first, e.g.: export TYPESAFE_API_KEY=your_key_here")
 
@@ -150,7 +165,7 @@ def fetch():
     """Pull recent listings and score them in one pass -- the site shows
     result cards directly from this call, no intermediate paste step."""
     data = request.get_json(force=True)
-    profile = (data.get("profile") or "").strip()
+    profile = redact_pii((data.get("profile") or "").strip())
     sources = data.get("sources") or []
     greenhouse = [c for c in (data.get("greenhouse") or "").split(",") if c.strip()]
     lever = [c for c in (data.get("lever") or "").split(",") if c.strip()]
@@ -390,7 +405,7 @@ def draft_cover_letter():
         ), 400
 
     data = request.get_json(force=True)
-    profile = (data.get("profile") or "").strip()
+    profile = redact_pii((data.get("profile") or "").strip())
     title = (data.get("title") or "").strip()
     description = (data.get("description") or "").strip()
     location = (data.get("location") or "").strip()
@@ -438,7 +453,7 @@ def match_breakdown():
         ), 400
 
     data = request.get_json(force=True)
-    profile = (data.get("profile") or "").strip()
+    profile = redact_pii((data.get("profile") or "").strip())
     title = (data.get("title") or "").strip()
     description = (data.get("description") or "").strip()
 

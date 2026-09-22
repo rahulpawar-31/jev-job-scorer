@@ -74,6 +74,16 @@
   .resume-row input[type="file"] { font-size: 13px; max-width: 220px; }
   .resume-row button { margin-top: 0; padding: 8px 14px; font-size: 13px; }
   #resumeStatus { margin-bottom: 0; }
+  .privacy-note {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: #f8f5eb;
+    border: 1px solid #e8dfc4;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #7a6a3f;
+    line-height: 1.4;
+  }
   #results-card { display: none; }
   .results-grid {
     display: grid;
@@ -191,6 +201,7 @@
       <button id="resumeBtn" onclick="uploadResume()" type="button">Use my resume</button>
       <span id="resumeStatus" class="hint"></span>
     </div>
+    <div class="privacy-note">This text is sent to TypeSafe (Jev) for every listing scored, and to Google (Gemini) for resume comparisons and cover letters &mdash; both external APIs. Email and phone number are automatically redacted before anything is sent; nothing else is.</div>
   </div>
 
   <div class="card">

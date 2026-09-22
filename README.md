@@ -19,6 +19,9 @@ you apply yourself.
 - **Drafts a cover letter** per listing, grounded only in what's actually on your resume
 - Falls back gracefully to Jev's own fit score (clearly labeled "not yet verified") if the resume
   comparison step is unavailable, instead of hiding everything
+- **Remembers what you've already seen.** Scores are cached locally (SQLite, `data.db`) per
+  resume, so re-running doesn't re-pay for or re-show the same listings. Mark a listing "applied"
+  or "not interested" and it's gone for good, regardless of future fetches
 
 ## Why Jev, not just an LLM
 
@@ -44,6 +47,24 @@ python app.py
 
 `GEMINI_API_KEY` is optional — everything works without it except the resume-comparison and
 cover-letter features, which fail with a clear message telling you how to enable them.
+
+## Privacy
+
+This is a local app (binds to `127.0.0.1`, no auth, no account) but it is **not** offline: your
+resume/profile text is sent to two external APIs on every run —
+
+- **TypeSafe (Jev)** — every listing's score (fit, seniority, red-flag, urgency) includes your
+  profile in the prompt
+- **Google (Gemini)** — the resume-comparison and cover-letter features send your profile text too
+
+Email addresses and phone numbers are automatically redacted from the profile before either call
+is made (job-fit scoring never needs them). Nothing else is redacted — the rest of your resume
+text, including work history and any other identifying details it contains, does leave the
+machine. If that's not acceptable for your resume, edit the profile text box down to just the
+role/skills summary before fetching, instead of using the full extracted PDF text.
+
+`data.db` (the local cache) and any uploaded resume text stay on your machine — those are never
+sent anywhere beyond the two API calls above, and `data.db` is gitignored.
 
 ## Sources
 
