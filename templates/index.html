@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Job Listing Scorer — powered by Jev</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --border: #e2e5ea;
+    --text: #1a1d23;
+    --muted: #6b7280;
+    --accent: #2f6f4f;
+    --accent-dark: #245a3f;
+    --danger: #b3261e;
+    --warn: #b8860b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  p.sub { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+  }
+  #profile { height: 70px; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 14px;
+  }
+  button:hover { background: var(--accent-dark); }
+  button:disabled { background: #9ca3af; cursor: default; }
+  #error { color: var(--danger); font-size: 14px; margin-top: 10px; display: none; }
+  .checks { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+  .check { display: flex; align-items: center; gap: 6px; font-weight: 400; font-size: 14px; }
+  .company-row { display: flex; gap: 10px; margin-bottom: 4px; }
+  .company-row input[type="text"] {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  #fetchStatus { margin-left: 12px; }
+  .resume-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .resume-row input[type="file"] { font-size: 13px; max-width: 220px; }
+  .resume-row button { margin-top: 0; padding: 8px 14px; font-size: 13px; }
+  #resumeStatus { margin-bottom: 0; }
+  #results-card { display: none; }
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 12px;
+  }
+  .job-card {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease;
+  }
+  a.job-card:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .job-card.no-link { cursor: default; }
+  .job-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; line-height: 1.35; }
+  .job-meta { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+  .job-snippet {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .fit-row { display: flex; align-items: center; margin-bottom: 10px; }
+  .fit-bar-bg { background: #e9ecef; border-radius: 4px; height: 8px; width: 80px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 8px; }
+  .fit-bar { height: 8px; background: var(--accent); }
+  .fit-score { font-size: 12px; font-weight: 700; color: var(--accent-dark); }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; margin-right: 4px; }
+  .tag-urgent { background: #fff4e5; color: var(--warn); }
+  .tag-flag { background: #fdecea; color: var(--danger); }
+  .tag-senior { background: #eef1fd; color: #4152b3; }
+  .tag-unverified { background: #f3f4f6; color: var(--muted); }
+  .tags:empty::after { content: '\2014'; color: var(--muted); font-size: 12px; }
+  .draft-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #eef2ef;
+    color: var(--accent-dark);
+  }
+  .draft-btn:hover { background: #e0e8e2; }
+  .draft-output { display: none; margin-top: 10px; }
+  .match-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 10px; text-transform: uppercase; }
+  .match-section { margin-top: 4px; }
+  .match-list { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+  .match-list li {
+    display: flex;
+    gap: 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.4;
+  }
+  .match-list li:last-child { border-bottom: none; }
+  .match-list .check { color: var(--accent-dark); font-weight: 700; flex-shrink: 0; }
+  .match-list .requirement { font-weight: 600; }
+  .match-list .evidence { color: var(--muted); display: block; }
+  .match-empty { font-size: 12px; color: var(--muted); font-style: italic; }
+  .draft-text {
+    width: 100%;
+    height: 160px;
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    resize: vertical;
+    color: var(--text);
+    background: var(--bg);
+  }
+  .copy-btn {
+    margin-top: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Job Listing Scorer</h1>
+  <p class="sub">Powered by Jev (TypeSafe AI). Scores listings for fit, urgency, and red flags — it never applies or submits anything for you.</p>
+
+  <div class="card">
+    <label for="profile">Your target role &amp; key skills</label>
+    <div class="hint">e.g. "Backend engineer, 4 years Node.js/TypeScript/Postgres, looking for remote roles at seed-to-series-B startups" &mdash; or upload your resume and it fills this in from your actual role, skills, and experience.</div>
+    <textarea id="profile" placeholder="Describe your target role and skills..."></textarea>
+    <div class="resume-row">
+      <input type="file" id="resumeFile" accept="application/pdf">
+      <button id="resumeBtn" onclick="uploadResume()" type="button">Use my resume</button>
+      <span id="resumeStatus" class="hint"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Fetch &amp; score listings</label>
+    <div class="hint">Pulls from public, ToS-friendly sources. LinkedIn/Indeed aren't included — those don't offer a public feed. Only listings posted in the last 7 days are shown; older ones are dropped.</div>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="src-remoteok" checked> RemoteOK</label>
+      <label class="check"><input type="checkbox" id="src-wwr" checked> We Work Remotely</label>
+      <label class="check"><input type="checkbox" id="src-remotive" checked> Remotive</label>
+      <label class="check"><input type="checkbox" id="src-arbeitnow" checked> Arbeitnow</label>
+      <label class="check"><input type="checkbox" id="src-jobicy" checked> Jobicy</label>
+      <label class="check"><input type="checkbox" id="src-hn"> HN "Who is hiring"</label>
+    </div>
+    <div class="hint" style="margin-top:10px;">Optional: specific companies (comma-separated slugs)</div>
+    <div class="company-row">
+      <input type="text" id="greenhouse" placeholder="Greenhouse companies, e.g. stripe,airbnb">
+      <input type="text" id="lever" placeholder="Lever companies, e.g. netflix">
+    </div>
+    <button id="fetchBtn" onclick="fetchAndScore()">Fetch listings</button>
+    <span id="fetchStatus" class="hint"></span>
+    <div id="error"></div>
+  </div>
+
+  <div class="card" id="results-card">
+    <label>Results, best fit first</label>
+    <div class="hint">Click a card to open the live posting.</div>
+    <div class="results-grid" id="results-grid"></div>
+  </div>
+</div>
+
+<script>
+let lastResults = [];
+let lastProfile = '';
+
+function timeAgo(iso) {
+  if (!iso) return 'date unknown';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${Math.max(mins, 0)}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+async function uploadResume() {
+  const fileInput = document.getElementById('resumeFile');
+  const status = document.getElementById('resumeStatus');
+  const btn = document.getElementById('resumeBtn');
+  const file = fileInput.files[0];
+
+  if (!file) {
+    status.textContent = 'Choose a PDF first.';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('resume', file);
+
+  btn.disabled = true;
+  btn.textContent = 'Reading...';
+  status.textContent = '';
+
+  try {
+    const resp = await fetch('/parse_resume', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (!resp.ok) {
+      status.textContent = data.error || 'Could not read that resume.';
+      return;
+    }
+    document.getElementById('profile').value = data.profile_text;
+    status.textContent = 'Resume loaded below — edit if you want, then fetch listings.';
+  } catch (e) {
+    status.textContent = 'Request failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Use my resume';
+  }
+}
+
+async function fetchAndScore() {
+  const profile = document.getElementById('profile').value;
+  const sources = [];
+  if (document.getElementById('src-remoteok').checked) sources.push('remoteok');
+  if (document.getElementById('src-wwr').checked) sources.push('wwr');
+  if (document.getElementById('src-remotive').checked) sources.push('remotive');
+  if (document.getElementById('src-arbeitnow').checked) sources.push('arbeitnow');
+  if (document.getElementById('src-jobicy').checked) sources.push('jobicy');
+  if (document.getElementById('src-hn').checked) sources.push('hn');
+  const greenhouse = document.getElementById('greenhouse').value;
+  const lever = document.getElementById('lever').value;
+
+  const btn = document.getElementById('fetchBtn');
+  const status = document.getElementById('fetchStatus');
+  const errorEl = document.getElementById('error');
+  const resultsCard = document.getElementById('results-card');
+  const grid = document.getElementById('results-grid');
+
+  errorEl.style.display = 'none';
+  resultsCard.style.display = 'none';
+  status.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Fetching, scoring & comparing to resume...';
+
+  try {
+    const resp = await fetch('/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile, sources, greenhouse, lever, limit_per_source: 50 }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      errorEl.textContent = data.error || 'Something went wrong.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    lastResults = data.results;
+    lastProfile = profile;
+
+    grid.innerHTML = '';
+    data.results.forEach((r, idx) => {
+      const pct = Math.max(0, Math.min(100, (r.fit / 2) * 100));
+      const tags = [];
+      if (r.urgent) tags.push('<span class="tag tag-urgent">urgent</span>');
+      if (r.red_flag) tags.push('<span class="tag tag-flag">red flag</span>');
+      if (r.seniority_mismatch) tags.push('<span class="tag tag-senior">needs more experience</span>');
+      if (!r.verified) tags.push('<span class="tag tag-unverified">not yet verified vs. resume</span>');
+
+      const hasLink = Boolean(r.url);
+      const card = document.createElement(hasLink ? 'a' : 'div');
+      card.className = 'job-card' + (hasLink ? '' : ' no-link');
+      if (hasLink) {
+        card.href = r.url;
+        card.target = '_blank';
+        card.rel = 'noopener';
+      }
+      card.innerHTML = `
+        <div class="job-title">${r.title}</div>
+        <div class="job-meta">${r.location} &middot; ${timeAgo(r.posted_at)} &middot; ${r.source}</div>
+        <div class="job-snippet">${r.description}</div>
+        <div class="fit-row">
+          <span class="fit-bar-bg"><span class="fit-bar" style="width:${pct}%"></span></span>
+          <span class="fit-score">${r.fit.toFixed(2)} fit</span>
+        </div>
+        <div class="tags">${tags.join('')}</div>
+        <div class="match-section"></div>
+        <button type="button" class="draft-btn" data-idx="${idx}">Draft cover letter</button>
+        <div class="draft-output"></div>
+      `;
+      if (r.verified) {
+        const label = document.createElement('div');
+        label.className = 'match-label';
+        label.textContent = 'Matches your resume:';
+        const section = card.querySelector('.match-section');
+        section.appendChild(label);
+        section.appendChild(renderMatchList(r.matches));
+      }
+      card.querySelector('.draft-btn').addEventListener('click', draftCoverLetter);
+      grid.appendChild(card);
+    });
+    const verifiedCount = data.count - data.unverified_count;
+    let statusMsg = `${verifiedCount} of ${data.checked} checked actually matched your resume`;
+    if (data.unverified_count > 0) {
+      statusMsg += ` (+${data.unverified_count} shown unverified — Gemini was unavailable)`;
+    }
+    statusMsg += `. ${data.total_fetched} fetched total.`;
+    status.textContent = statusMsg;
+    resultsCard.style.display = 'block';
+  } catch (e) {
+    errorEl.textContent = 'Request failed: ' + e.message;
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch listings';
+  }
+}
+
+function renderMatchList(matches) {
+  if (!matches || matches.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'match-empty';
+    empty.textContent = 'No clear matches found.';
+    return empty;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'match-list';
+  for (const m of matches) {
+    const li = document.createElement('li');
+    const check = document.createElement('span');
+    check.className = 'check';
+    check.textContent = '✓';
+    const text = document.createElement('span');
+    const req = document.createElement('span');
+    req.className = 'requirement';
+    req.textContent = m.requirement || '';
+    const evidence = document.createElement('span');
+    evidence.className = 'evidence';
+    evidence.textContent = m.evidence || '';
+    text.appendChild(req);
+    text.appendChild(evidence);
+    li.appendChild(check);
+    li.appendChild(text);
+    list.appendChild(li);
+  }
+  return list;
+}
+
+async function draftCoverLetter(event) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const btn = event.currentTarget;
+  const idx = Number(btn.dataset.idx);
+  const job = lastResults[idx];
+  const output = btn.nextElementSibling;
+
+  btn.disabled = true;
+  btn.textContent = 'Drafting...';
+  output.innerHTML = '';
+  output.style.display = 'none';
+
+  try {
+    const resp = await fetch('/draft_cover_letter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profile: lastProfile,
+        title: job.title,
+        description: job.description,
+        location: job.location,
+      }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      output.textContent = data.error || 'Failed to draft.';
+      output.style.display = 'block';
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'draft-text';
+    textarea.readOnly = true;
+    textarea.value = data.draft;
+    textarea.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'copy-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigator.clipboard.writeText(textarea.value);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    });
+
+    output.appendChild(textarea);
+    output.appendChild(copyBtn);
+    output.style.display = 'block';
+  } catch (e) {
+    output.textContent = 'Request failed: ' + e.message;
+    output.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Draft cover letter';
+  }
+}
+</script>
+</body>
+</html>
