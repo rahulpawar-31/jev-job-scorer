@@ -249,6 +249,7 @@
       <input type="text" id="lever" placeholder="Lever companies, e.g. netflix">
       <input type="text" id="ashby" placeholder="Ashby companies, e.g. linear">
       <input type="text" id="workable" placeholder="Workable companies, e.g. huggingface">
+      <input type="text" id="recruitee" placeholder="Recruitee companies, e.g. anywhereworks">
     </div>
     <button id="fetchBtn" onclick="fetchAndScore()">Fetch listings</button>
     <span id="fetchStatus" class="hint"></span>
@@ -350,6 +351,7 @@ async function fetchAndScore() {
   const lever = document.getElementById('lever').value;
   const ashby = document.getElementById('ashby').value;
   const workable = document.getElementById('workable').value;
+  const recruitee = document.getElementById('recruitee').value;
 
   const btn = document.getElementById('fetchBtn');
   const status = document.getElementById('fetchStatus');
@@ -367,7 +369,7 @@ async function fetchAndScore() {
     const resp = await fetch('/fetch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profile, sources, greenhouse, lever, ashby, workable, limit_per_source: 50 }),
+      body: JSON.stringify({ profile, sources, greenhouse, lever, ashby, workable, recruitee, limit_per_source: 50 }),
     });
     const data = await resp.json();
 
