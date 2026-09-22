@@ -127,6 +127,20 @@
     background: #eef2ef;
     color: var(--accent-dark);
   }
+  .action-row { display: flex; gap: 8px; margin-top: 10px; }
+  .action-btn {
+    flex: 1;
+    margin-top: 0;
+    padding: 7px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted);
+  }
+  .action-btn:hover:not(:disabled) { background: #f3f4f6; }
+  .apply-btn:hover:not(:disabled) { color: var(--accent-dark); border-color: var(--accent); }
+  .dismiss-btn:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
   .draft-btn:hover { background: #e0e8e2; }
   .draft-output { display: none; margin-top: 10px; }
   .match-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 10px; text-transform: uppercase; }
@@ -325,6 +339,10 @@ async function fetchAndScore() {
         </div>
         <div class="tags">${tags.join('')}</div>
         <div class="match-section"></div>
+        <div class="action-row">
+          <button type="button" class="action-btn apply-btn" data-url="${r.url}">Mark applied</button>
+          <button type="button" class="action-btn dismiss-btn" data-url="${r.url}">Not interested</button>
+        </div>
         <button type="button" class="draft-btn" data-idx="${idx}">Draft cover letter</button>
         <div class="draft-output"></div>
       `;
@@ -337,6 +355,8 @@ async function fetchAndScore() {
         section.appendChild(renderMatchList(r.matches));
       }
       card.querySelector('.draft-btn').addEventListener('click', draftCoverLetter);
+      card.querySelector('.apply-btn').addEventListener('click', (e) => setListingStatus(e, 'applied'));
+      card.querySelector('.dismiss-btn').addEventListener('click', (e) => setListingStatus(e, 'dismissed'));
       grid.appendChild(card);
     });
     const verifiedCount = data.count - data.unverified_count;
@@ -344,7 +364,11 @@ async function fetchAndScore() {
     if (data.unverified_count > 0) {
       statusMsg += ` (+${data.unverified_count} shown unverified — Gemini was unavailable)`;
     }
-    statusMsg += `. ${data.total_fetched} fetched total.`;
+    statusMsg += `. ${data.total_fetched} fetched total`;
+    if (data.reused_count > 0) {
+      statusMsg += ` (${data.reused_count} already scored from a previous run, reused free)`;
+    }
+    statusMsg += '.';
     status.textContent = statusMsg;
     resultsCard.style.display = 'block';
   } catch (e) {
@@ -385,6 +409,34 @@ function renderMatchList(matches) {
     list.appendChild(li);
   }
   return list;
+}
+
+async function setListingStatus(event, status) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const btn = event.currentTarget;
+  const url = btn.dataset.url;
+  const card = btn.closest('.job-card');
+  const row = btn.closest('.action-row');
+  row.querySelectorAll('button').forEach((b) => (b.disabled = true));
+
+  try {
+    const resp = await fetch('/listing/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, status }),
+    });
+    if (!resp.ok) {
+      row.querySelectorAll('button').forEach((b) => (b.disabled = false));
+      return;
+    }
+    // Marked dismissed/applied server-side -- it won't resurface on the next
+    // fetch either way, so just remove the card now instead of waiting.
+    card.remove();
+  } catch (e) {
+    row.querySelectorAll('button').forEach((b) => (b.disabled = false));
+  }
 }
 
 async function draftCoverLetter(event) {

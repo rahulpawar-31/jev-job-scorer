@@ -29,6 +29,7 @@ from google.genai import types as genai_types
 from pypdf import PdfReader
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
+import store
 from fetch_jobs import fetch_all
 
 MAX_PROFILE_CHARS = 6000
@@ -38,6 +39,7 @@ if not os.environ.get("TYPESAFE_API_KEY"):
 
 app = Flask(__name__)
 client = TypeSafeClient()
+store.init_db()
 
 # Jev (TypeSafe) can't write text -- it only answers typed questions. Cover
 # letter drafting needs an actual generative model, so this one feature uses
@@ -163,6 +165,41 @@ def fetch():
     if not listings:
         return jsonify({"error": "No listings from the last 7 days came back. Try different sources/companies."}), 400
 
+    # Persistence: a listing already scored against this exact profile doesn't
+    # need scoring again, and one already dismissed/applied should never come
+    # back. Without this, every run re-pays for and re-shows the same postings.
+    phash = store.profile_hash(profile)
+    urls = [l["url"] for l in listings if l.get("url")]
+    cached_rows = store.get_many(urls)
+
+    def result_from_cache(cached):
+        return {
+            "title": cached["title"],
+            "url": cached["url"],
+            "location": cached["location"],
+            "description": cached["description"],
+            "source": cached["source"],
+            "posted_at": cached["posted_at"] or None,
+            "fit": cached["fit"],
+            "fit_confidence": cached["fit_confidence"],
+            "urgent": bool(cached["urgent"]),
+            "red_flag": bool(cached["red_flag"]),
+            "seniority_mismatch": bool(cached["seniority_mismatch"]),
+            "_cached_verified": bool(cached["verified"]),
+            "_cached_matches": store.matches_from_json(cached["matches_json"]),
+        }
+
+    to_score = []
+    reused = []
+    for listing in listings:
+        cached = cached_rows.get(listing.get("url"))
+        if cached and cached["status"] in ("dismissed", "applied"):
+            continue  # already acted on -- never resurface
+        if cached and cached["profile_hash"] == phash and cached["fit"] is not None:
+            reused.append(result_from_cache(cached))
+        else:
+            to_score.append(listing)
+
     questions = dict(QUESTIONS)
     questions["fit"] = Score(
         instructions=(
@@ -199,10 +236,36 @@ def fetch():
             "urgent": answers["urgency"].noul > 0.5,
             "red_flag": answers["red_flag"].noul > 0.5,
             "seniority_mismatch": answers["seniority_mismatch"].noul > 0.5,
+            "_cached_verified": False,
+            "_cached_matches": None,
         }
 
-    with ThreadPoolExecutor(max_workers=10) as pool:
-        results = list(pool.map(score_listing, listings))
+    if to_score:
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            freshly_scored = list(pool.map(score_listing, to_score))
+    else:
+        freshly_scored = []
+
+    for r in freshly_scored:
+        if not r["url"]:
+            continue
+        store.upsert(
+            r["url"],
+            source=r["source"],
+            title=r["title"],
+            location=r["location"],
+            description=r["description"],
+            posted_at=r["posted_at"] or "",
+            profile_hash=phash,
+            fit=r["fit"],
+            fit_confidence=r["fit_confidence"],
+            urgent=int(r["urgent"]),
+            red_flag=int(r["red_flag"]),
+            seniority_mismatch=int(r["seniority_mismatch"]),
+        )
+
+    results = reused + freshly_scored
+    reused_count = len(reused)
 
     # Seniority mismatches sink to the bottom regardless of tech-stack fit --
     # a "Staff Engineer" posting isn't a good match just because it name-drops
@@ -216,8 +279,11 @@ def fetch():
     FIT_FALLBACK_THRESHOLD = 0.5  # some real signal, not "no fit" -- kept low since
     # this is a fallback bar, not the seniority/red-flag gate below
 
-    gemini = get_gemini_client()
-    candidates = results[:MATCH_CHECK_LIMIT]
+    def passes_fallback(r):
+        # Match how every other signal in this app works: flags demote/label,
+        # they don't hide. seniority_mismatch/red_flag still show as tags on
+        # the card either way -- the person judges, same as verified results.
+        return r["fit"] >= FIT_FALLBACK_THRESHOLD
 
     def check(r):
         try:
@@ -226,55 +292,90 @@ def fetch():
         except Exception:
             return r, None, False  # Gemini failed/timed out -- not the same as "no match"
 
-    if gemini is not None:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            checked = list(pool.map(check, candidates))
-    else:
-        checked = [(r, None, False) for r in candidates]
+    def apply_verified(r, matches):
+        # Persisted either way -- a confirmed "no match" shouldn't cost another
+        # Gemini call next run either, same as a confirmed match.
+        store.upsert(r["url"], verified=1, matches_json=store.matches_to_json(matches))
+        if matches:
+            r["matches"] = matches
+            r["verified"] = True
+            return True
+        return False
 
-    def passes_fallback(r):
-        # Match how every other signal in this app works: flags demote/label,
-        # they don't hide. seniority_mismatch/red_flag still show as tags on
-        # the card either way -- the person judges, same as verified results.
-        return r["fit"] >= FIT_FALLBACK_THRESHOLD
+    def apply_fallback(r):
+        if not passes_fallback(r):
+            return False
+        r["matches"] = []
+        r["verified"] = False
+        return True
 
+    gemini = get_gemini_client()
     matched_results = []
     unverified_count = 0
-    for r, matches, verified in checked:
-        if verified:
-            if matches:  # Gemini confirmed real, specific matches
+    gemini_cache_hits = 0
+
+    for idx, tier in enumerate((results[:MATCH_CHECK_LIMIT], results[MATCH_CHECK_LIMIT:])):
+        is_top_tier = idx == 0
+
+        already_verified = [r for r in tier if r["_cached_verified"]]
+        needs_check = [r for r in tier if not r["_cached_verified"]]
+
+        for r in already_verified:
+            gemini_cache_hits += 1
+            matches = r["_cached_matches"] or []
+            if matches:
                 r["matches"] = matches
                 r["verified"] = True
                 matched_results.append(r)
-            # verified but genuinely empty -> Gemini checked and found nothing, exclude
-        elif passes_fallback(r):
-            r["matches"] = []
-            r["verified"] = False
-            matched_results.append(r)
-            unverified_count += 1
+            elif apply_fallback(r):
+                unverified_count += 1
+                matched_results.append(r)
 
-    # Jev already scored every fetched listing in the first pass, not just the
-    # MATCH_CHECK_LIMIT ones that got a (slow, capped) Gemini attempt. Use that
-    # for free instead of leaving the rest of the fetch unused -- especially
-    # while Gemini's free tier is degraded and verified matches are scarce.
-    for r in results[MATCH_CHECK_LIMIT:]:
-        if passes_fallback(r):
-            r["matches"] = []
-            r["verified"] = False
-            matched_results.append(r)
-            unverified_count += 1
+        # Only the top tier pays for a live Gemini attempt -- the (slow,
+        # capped) comparison call. The rest fall back to Jev's free fit score.
+        if is_top_tier and gemini is not None and needs_check:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                checked = list(pool.map(check, needs_check))
+        else:
+            checked = [(r, None, False) for r in needs_check]
+
+        for r, matches, verified in checked:
+            if verified:
+                if apply_verified(r, matches):
+                    matched_results.append(r)
+            elif apply_fallback(r):
+                unverified_count += 1
+                matched_results.append(r)
 
     matched_results.sort(key=lambda r: (r["seniority_mismatch"], not r["verified"], -r["fit"]))
+    for r in matched_results:
+        r.pop("_cached_verified", None)
+        r.pop("_cached_matches", None)
 
     return jsonify(
         {
             "unverified_count": unverified_count,
+            "reused_count": reused_count,
+            "gemini_cache_hits": gemini_cache_hits,
             "results": matched_results,
             "count": len(matched_results),
             "checked": min(len(results), MATCH_CHECK_LIMIT),
             "total_fetched": len(results),
         }
     )
+
+
+@app.route("/listing/status", methods=["POST"])
+def listing_status():
+    """Marks a listing dismissed or applied so it stops resurfacing in every
+    future fetch, regardless of resume/profile changes."""
+    data = request.get_json(force=True)
+    url = (data.get("url") or "").strip()
+    status = (data.get("status") or "").strip()
+    if not url or status not in ("dismissed", "applied", "new"):
+        return jsonify({"error": "Invalid url or status."}), 400
+    store.set_status(url, status)
+    return jsonify({"ok": True})
 
 
 @app.route("/draft_cover_letter", methods=["POST"])
