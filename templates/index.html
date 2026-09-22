@@ -380,6 +380,16 @@ async function fetchAndScore() {
       statusMsg += ` (${data.reused_count} already scored from a previous run, reused free)`;
     }
     statusMsg += '.';
+    if (data.skipped_for_cap > 0) {
+      statusMsg += ` ${data.skipped_for_cap} listings skipped this run (per-run cap) — fetch again to pick up more.`;
+    }
+    if (data.gemini_capped) {
+      statusMsg += ' Daily Gemini budget reached — results fell back to Jev-only scoring.';
+    }
+    const usage = data.usage_today;
+    if (usage) {
+      statusMsg += ` Today: ${usage.jev.calls} Jev calls (${usage.jev.tokens.toLocaleString()} tokens), ${usage.gemini.calls} Gemini calls.`;
+    }
     status.textContent = statusMsg;
     resultsCard.style.display = 'block';
   } catch (e) {

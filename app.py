@@ -82,9 +82,29 @@ def get_gemini_client():
     return _gemini_client
 
 
+def gemini_cap_exceeded():
+    return store.usage_today()["gemini"]["calls"] >= DAILY_GEMINI_CALL_CAP
+
+
+def daily_gemini_cap_message():
+    return (
+        f"Daily Gemini call budget reached ({DAILY_GEMINI_CALL_CAP} calls used today). "
+        "Resets at midnight UTC. Raise DAILY_GEMINI_CALL_CAP in app.py if you want a higher cap."
+    )
+
+
 MATCH_CHECK_LIMIT = 8  # how many top-fit listings get the (slower) Gemini comparison -- kept
 # small and equal to the thread pool size so it's one parallel wave, not several sequential
 # batches. Gemini's free tier can be genuinely slow/retried under load, unlike Jev.
+
+# Cost/rate guardrails. TypeSafe is billed on input tokens ($0.042/million as of
+# writing); Gemini's free tier is rate-limited rather than billed, but both can
+# balloon silently if a large multi-source fetch triggers far more calls than
+# intended -- an LLM council review of this repo flagged exactly that.
+MAX_JEV_CALLS_PER_RUN = 150  # hard cap per single /fetch, regardless of how many
+# sources/companies are selected or how high limit_per_source is set
+DAILY_JEV_TOKEN_CAP = 3_000_000  # ~$0.13/day at $0.042/million input tokens
+DAILY_GEMINI_CALL_CAP = 100  # stay well under typical free-tier daily quotas
 
 
 def get_resume_matches(gemini, profile, title, description):
@@ -110,6 +130,8 @@ Respond with ONLY valid JSON in this exact shape, no markdown code fences, no ex
         contents=prompt,
         config={"response_mime_type": "application/json"},
     )
+    usage = response.usage_metadata
+    store.log_usage("gemini", usage.prompt_token_count if usage else 0)
     raw = (response.text or "").strip()
     return json.loads(raw).get("matches", [])
 
@@ -180,6 +202,18 @@ def fetch():
     if not listings:
         return jsonify({"error": "No listings from the last 7 days came back. Try different sources/companies."}), 400
 
+    usage_before = store.usage_today()
+    if usage_before["jev"]["tokens"] >= DAILY_JEV_TOKEN_CAP:
+        return jsonify(
+            {
+                "error": (
+                    f"Daily Jev budget reached ({usage_before['jev']['tokens']:,} input tokens used today, "
+                    f"cap is {DAILY_JEV_TOKEN_CAP:,}). Resets at midnight UTC. Raise DAILY_JEV_TOKEN_CAP in "
+                    "app.py if you want a higher cap."
+                )
+            }
+        ), 429
+
     # Persistence: a listing already scored against this exact profile doesn't
     # need scoring again, and one already dismissed/applied should never come
     # back. Without this, every run re-pays for and re-shows the same postings.
@@ -215,6 +249,15 @@ def fetch():
         else:
             to_score.append(listing)
 
+    # Per-run cap: a large multi-source fetch with a high limit_per_source
+    # could otherwise trigger hundreds of Jev calls in one request. Score the
+    # first MAX_JEV_CALLS_PER_RUN and note the rest were skipped rather than
+    # silently scoring an unbounded number.
+    skipped_for_cap = 0
+    if len(to_score) > MAX_JEV_CALLS_PER_RUN:
+        skipped_for_cap = len(to_score) - MAX_JEV_CALLS_PER_RUN
+        to_score = to_score[:MAX_JEV_CALLS_PER_RUN]
+
     questions = dict(QUESTIONS)
     questions["fit"] = Score(
         instructions=(
@@ -237,6 +280,7 @@ def fetch():
     def score_listing(listing):
         state = f"Job title: {listing['title']}\nLocation: {listing.get('location', '')}\n\n{listing['description']}"
         response = client.system_one(state=state, questions=questions)
+        store.log_usage("jev", response.usage.input_tokens)
         answers = response.answers
         posted_at = listing.get("posted_at")
         return {
@@ -325,6 +369,8 @@ def fetch():
         return True
 
     gemini = get_gemini_client()
+    gemini_budget_left = DAILY_GEMINI_CALL_CAP - usage_before["gemini"]["calls"]
+    gemini_capped = gemini_budget_left <= 0
     matched_results = []
     unverified_count = 0
     gemini_cache_hits = 0
@@ -348,7 +394,7 @@ def fetch():
 
         # Only the top tier pays for a live Gemini attempt -- the (slow,
         # capped) comparison call. The rest fall back to Jev's free fit score.
-        if is_top_tier and gemini is not None and needs_check:
+        if is_top_tier and gemini is not None and needs_check and not gemini_capped:
             with ThreadPoolExecutor(max_workers=8) as pool:
                 checked = list(pool.map(check, needs_check))
         else:
@@ -376,6 +422,9 @@ def fetch():
             "count": len(matched_results),
             "checked": min(len(results), MATCH_CHECK_LIMIT),
             "total_fetched": len(results),
+            "skipped_for_cap": skipped_for_cap,
+            "gemini_capped": gemini_capped,
+            "usage_today": store.usage_today(),
         }
     )
 
@@ -403,6 +452,8 @@ def draft_cover_letter():
         return jsonify(
             {"error": "Set GEMINI_API_KEY to enable cover letter drafts. Free key: https://aistudio.google.com/apikey"}
         ), 400
+    if gemini_cap_exceeded():
+        return jsonify({"error": daily_gemini_cap_message()}), 429
 
     data = request.get_json(force=True)
     profile = redact_pii((data.get("profile") or "").strip())
@@ -432,6 +483,8 @@ Rules:
 
     try:
         response = gemini.models.generate_content(model="gemini-flash-lite-latest", contents=prompt)
+        usage = response.usage_metadata
+        store.log_usage("gemini", usage.prompt_token_count if usage else 0)
         draft = (response.text or "").strip()
     except Exception as e:
         return jsonify({"error": f"Draft generation failed: {e}"}), 502
@@ -451,6 +504,8 @@ def match_breakdown():
         return jsonify(
             {"error": "Set GEMINI_API_KEY to enable this. Free key: https://aistudio.google.com/apikey"}
         ), 400
+    if gemini_cap_exceeded():
+        return jsonify({"error": daily_gemini_cap_message()}), 429
 
     data = request.get_json(force=True)
     profile = redact_pii((data.get("profile") or "").strip())

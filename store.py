@@ -50,7 +50,44 @@ def init_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS usage_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
         conn.commit()
+
+
+def log_usage(provider, input_tokens=0):
+    """provider is 'jev' or 'gemini'. Every paid/rate-limited API call gets
+    logged so usage_today() can enforce a daily budget instead of this app
+    being able to burn an unbounded amount silently."""
+    with closing(_connect()) as conn:
+        conn.execute(
+            "INSERT INTO usage_log (ts, provider, input_tokens) VALUES (?, ?, ?)",
+            (datetime.now(timezone.utc).isoformat(), provider, input_tokens),
+        )
+        conn.commit()
+
+
+def usage_today():
+    """Calls and input tokens per provider since midnight UTC."""
+    today_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+    with closing(_connect()) as conn:
+        rows = conn.execute(
+            "SELECT provider, COUNT(*) AS calls, COALESCE(SUM(input_tokens), 0) AS tokens "
+            "FROM usage_log WHERE ts >= ? GROUP BY provider",
+            (today_start,),
+        ).fetchall()
+    usage = {"jev": {"calls": 0, "tokens": 0}, "gemini": {"calls": 0, "tokens": 0}}
+    for row in rows:
+        usage[row["provider"]] = {"calls": row["calls"], "tokens": row["tokens"]}
+    return usage
 
 
 def profile_hash(profile):

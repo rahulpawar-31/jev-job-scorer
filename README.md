@@ -66,6 +66,20 @@ role/skills summary before fetching, instead of using the full extracted PDF tex
 `data.db` (the local cache) and any uploaded resume text stay on your machine — those are never
 sent anywhere beyond the two API calls above, and `data.db` is gitignored.
 
+## Cost/rate limits
+
+TypeSafe bills on input tokens (~$0.042/million as of writing); Gemini's free tier is rate-limited
+rather than billed. Both are guarded so a large multi-source fetch can't silently balloon into
+hundreds of calls:
+
+- **Per-run cap** — at most `MAX_JEV_CALLS_PER_RUN` (150) Jev calls in a single fetch, regardless
+  of how many sources/companies are selected
+- **Daily caps** — `DAILY_JEV_TOKEN_CAP` (3M tokens, ~$0.13) and `DAILY_GEMINI_CALL_CAP` (100
+  calls), tracked in `data.db`, reset at midnight UTC. Hitting either returns a clear error instead
+  of failing silently
+- Actual usage (calls + tokens, today) is shown after every fetch — all constants are in `app.py`
+  if you want to raise or lower them
+
 ## Sources
 
 Only public, ToS-friendly job feeds are used — LinkedIn and Indeed aren't included since neither
