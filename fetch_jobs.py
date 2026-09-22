@@ -85,6 +85,8 @@ def fetch_remoteok(limit=15, max_age_days=MAX_AGE_DAYS):
         listings.append(
             {
                 "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
                 "description": strip_html(job.get("description", ""))[:1200],
                 "url": job.get("url", ""),
                 "location": fix_mojibake(job.get("location") or "") or "Remote",
@@ -124,9 +126,20 @@ def fetch_wwr(categories=("remote-programming-jobs",), limit=15, max_age_days=MA
             description = strip_html(item.findtext("description") or "")[:1200]
             link = (item.findtext("link") or "").strip()
             region = (item.findtext("region") or "").strip() or "Remote"
+
+            # WWR titles are conventionally "Company: Position" -- split so
+            # cross-source dedup can fingerprint on company+position like
+            # every other source, instead of the whole differently-shaped string.
+            if ": " in title:
+                company, position = title.split(": ", 1)
+            else:
+                company, position = "", title
+
             listings.append(
                 {
                     "title": title,
+                    "position": position,
+                    "company": company,
                     "description": description,
                     "url": link,
                     "location": region,
@@ -170,6 +183,8 @@ def fetch_hn_whos_hiring(limit=20, max_age_days=MAX_AGE_DAYS):
         listings.append(
             {
                 "title": f"HN posting: {title}",
+                "position": title,
+                "company": "",  # free-text comment, no reliable company field to dedupe on
                 "description": text[:1500],
                 "url": f"https://news.ycombinator.com/item?id={comment.get('id', '')}",
                 "location": "Not specified",
@@ -201,9 +216,12 @@ def fetch_greenhouse(company, limit=15, max_age_days=MAX_AGE_DAYS):
         if not is_recent(posted_at, max_age_days):
             continue
 
+        position = job.get("title", "Untitled")
         listings.append(
             {
-                "title": f"{job.get('title', 'Untitled')} at {company}",
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
                 "description": strip_html(job.get("content", ""))[:1200],
                 "url": job.get("absolute_url", ""),
                 "location": (job.get("location") or {}).get("name") or "Not specified",
@@ -230,9 +248,12 @@ def fetch_lever(company, limit=15, max_age_days=MAX_AGE_DAYS):
             continue
 
         description = job.get("descriptionPlain") or strip_html(job.get("description", ""))
+        position = job.get("text", "Untitled")
         listings.append(
             {
-                "title": f"{job.get('text', 'Untitled')} at {company}",
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
                 "description": description[:1200],
                 "url": job.get("hostedUrl", ""),
                 "location": (job.get("categories") or {}).get("location") or "Not specified",
@@ -266,9 +287,13 @@ def fetch_remotive(limit=15, max_age_days=MAX_AGE_DAYS):
         if not is_recent(posted_at, max_age_days):
             continue
 
+        position = job.get("title", "Untitled")
+        company = job.get("company_name", "Unknown company")
         listings.append(
             {
-                "title": f"{job.get('title', 'Untitled')} at {job.get('company_name', 'Unknown company')}",
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
                 "description": strip_html(job.get("description", ""))[:1200],
                 "url": job.get("url", ""),
                 "location": job.get("candidate_required_location") or "Remote",
@@ -295,9 +320,13 @@ def fetch_arbeitnow(limit=15, max_age_days=MAX_AGE_DAYS):
             continue
 
         location = job.get("location") or ("Remote" if job.get("remote") else "Not specified")
+        position = job.get("title", "Untitled")
+        company = job.get("company_name", "Unknown company")
         listings.append(
             {
-                "title": f"{job.get('title', 'Untitled')} at {job.get('company_name', 'Unknown company')}",
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
                 "description": strip_html(job.get("description", ""))[:1200],
                 "url": job.get("url", ""),
                 "location": location,
@@ -326,9 +355,13 @@ def fetch_jobicy(limit=15, max_age_days=MAX_AGE_DAYS):
         if not is_recent(posted_at, max_age_days):
             continue
 
+        position = job.get("jobTitle", "Untitled")
+        company = job.get("companyName", "Unknown company")
         listings.append(
             {
-                "title": f"{job.get('jobTitle', 'Untitled')} at {job.get('companyName', 'Unknown company')}",
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
                 "description": strip_html(job.get("jobExcerpt") or job.get("jobDescription", ""))[:1200],
                 "url": job.get("url", ""),
                 "location": job.get("jobGeo") or "Remote",
@@ -341,22 +374,62 @@ def fetch_jobicy(limit=15, max_age_days=MAX_AGE_DAYS):
     return listings
 
 
+SUFFIX_RE = re.compile(r"\b(inc|llc|ltd|gmbh|corp|corporation|co|plc)\b\.?", re.IGNORECASE)
+
+
+def _normalize_fingerprint_part(text):
+    text = (text or "").lower()
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = SUFFIX_RE.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def dedupe_listings(listings):
+    """Cross-posted jobs are the norm -- the same role is often on an
+    aggregator AND the company's own Greenhouse/Lever board. Fingerprint on
+    normalized company+position so those count as one opportunity, not two.
+    Listings with no parseable company (HN's free-text comments) fall back
+    to URL-only dedup, since there's nothing more reliable to compare."""
+    seen = set()
+    deduped = []
+    for listing in listings:
+        company = listing.get("company", "")
+        if company:
+            fingerprint = (
+                "cp::"
+                + _normalize_fingerprint_part(company)
+                + "::"
+                + _normalize_fingerprint_part(listing.get("position") or listing["title"])
+            )
+        else:
+            fingerprint = "url::" + listing["url"]
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(listing)
+    return deduped
+
+
 def fetch_all(sources, greenhouse_companies=None, lever_companies=None, limit_per_source=15, max_age_days=MAX_AGE_DAYS):
     listings = []
+    # Direct company boards first: if a job is cross-posted to an aggregator
+    # too, the company's own listing (more likely current, correctly
+    # formatted) wins the dedup below instead of losing to whichever
+    # aggregator happened to be fetched first.
+    for company in greenhouse_companies or []:
+        listings += fetch_greenhouse(company.strip(), limit_per_source, max_age_days)
+    for company in lever_companies or []:
+        listings += fetch_lever(company.strip(), limit_per_source, max_age_days)
     if "remoteok" in sources:
         listings += fetch_remoteok(limit_per_source, max_age_days)
-    if "wwr" in sources:
-        listings += fetch_wwr(limit=limit_per_source, max_age_days=max_age_days)
-    if "hn" in sources:
-        listings += fetch_hn_whos_hiring(limit_per_source, max_age_days)
     if "remotive" in sources:
         listings += fetch_remotive(limit_per_source, max_age_days)
     if "arbeitnow" in sources:
         listings += fetch_arbeitnow(limit_per_source, max_age_days)
     if "jobicy" in sources:
         listings += fetch_jobicy(limit_per_source, max_age_days)
-    for company in greenhouse_companies or []:
-        listings += fetch_greenhouse(company.strip(), limit_per_source, max_age_days)
-    for company in lever_companies or []:
-        listings += fetch_lever(company.strip(), limit_per_source, max_age_days)
-    return listings
+    if "wwr" in sources:
+        listings += fetch_wwr(limit=limit_per_source, max_age_days=max_age_days)
+    if "hn" in sources:
+        listings += fetch_hn_whos_hiring(limit_per_source, max_age_days)
+    return dedupe_listings(listings)
