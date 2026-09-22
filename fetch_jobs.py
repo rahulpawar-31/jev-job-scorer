@@ -3,7 +3,10 @@ Pulls job listings from public, ToS-friendly sources:
   - RemoteOK (public JSON API)
   - We Work Remotely (public RSS feeds)
   - Hacker News "Who is hiring?" monthly thread (public Algolia API)
-  - Any Greenhouse or Lever company job board (public JSON endpoints)
+  - Any Greenhouse, Lever, Ashby, or Workable company job board (public JSON
+    endpoints, unauthenticated -- these are the four ATS platforms with a
+    company-scoped public API; the company slug is whatever appears in that
+    company's own careers-page URL)
 
 No scraping of sites that prohibit it (LinkedIn, Indeed) -- those need a
 different approach and are left out on purpose.
@@ -266,6 +269,81 @@ def fetch_lever(company, limit=15, max_age_days=MAX_AGE_DAYS):
     return listings
 
 
+def fetch_ashby(company, limit=15, max_age_days=MAX_AGE_DAYS):
+    try:
+        jobs = get_json(f"https://api.ashbyhq.com/posting-api/job-board/{company}").get("jobs", [])
+    except Exception:
+        return []
+
+    listings = []
+    for job in jobs:
+        raw_date = job.get("publishedAt")
+        try:
+            posted_at = datetime.fromisoformat(raw_date) if raw_date else None
+        except ValueError:
+            posted_at = None
+        if not is_recent(posted_at, max_age_days):
+            continue
+
+        position = job.get("title", "Untitled")
+        listings.append(
+            {
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
+                "description": strip_html(job.get("descriptionHtml", ""))[:1200],
+                "url": job.get("jobUrl", ""),
+                "location": job.get("location") or ("Remote" if job.get("isRemote") else "Not specified"),
+                "source": f"Ashby ({company})",
+                "posted_at": posted_at,
+            }
+        )
+        if len(listings) >= limit:
+            break
+    return listings
+
+
+def fetch_workable(company, limit=15, max_age_days=MAX_AGE_DAYS):
+    try:
+        jobs = get_json(
+            f"https://apply.workable.com/api/v1/widget/accounts/{company}",
+            params={"details": "true"},
+        ).get("jobs", [])
+    except Exception:
+        return []
+
+    listings = []
+    for job in jobs:
+        raw_date = job.get("published_on")
+        try:
+            # Workable only gives a date, no time -- treat as UTC midnight,
+            # same convention as every other posted_at in this module.
+            posted_at = datetime.fromisoformat(raw_date).replace(tzinfo=timezone.utc) if raw_date else None
+        except ValueError:
+            posted_at = None
+        if not is_recent(posted_at, max_age_days):
+            continue
+
+        position = job.get("title", "Untitled")
+        location = ", ".join(p for p in (job.get("city"), job.get("country")) if p)
+        location = location or ("Remote" if job.get("telecommuting") else "Not specified")
+        listings.append(
+            {
+                "title": f"{position} at {company}",
+                "position": position,
+                "company": company,
+                "description": strip_html(job.get("description", ""))[:1200],
+                "url": job.get("url", ""),
+                "location": location,
+                "source": f"Workable ({company})",
+                "posted_at": posted_at,
+            }
+        )
+        if len(listings) >= limit:
+            break
+    return listings
+
+
 def fetch_remotive(limit=15, max_age_days=MAX_AGE_DAYS):
     """Remotive's free API is personal-use only per their terms: max ~4
     requests/day, listings delayed 24h, no redistributing the data
@@ -410,7 +488,15 @@ def dedupe_listings(listings):
     return deduped
 
 
-def fetch_all(sources, greenhouse_companies=None, lever_companies=None, limit_per_source=15, max_age_days=MAX_AGE_DAYS):
+def fetch_all(
+    sources,
+    greenhouse_companies=None,
+    lever_companies=None,
+    ashby_companies=None,
+    workable_companies=None,
+    limit_per_source=15,
+    max_age_days=MAX_AGE_DAYS,
+):
     listings = []
     # Direct company boards first: if a job is cross-posted to an aggregator
     # too, the company's own listing (more likely current, correctly
@@ -420,6 +506,10 @@ def fetch_all(sources, greenhouse_companies=None, lever_companies=None, limit_pe
         listings += fetch_greenhouse(company.strip(), limit_per_source, max_age_days)
     for company in lever_companies or []:
         listings += fetch_lever(company.strip(), limit_per_source, max_age_days)
+    for company in ashby_companies or []:
+        listings += fetch_ashby(company.strip(), limit_per_source, max_age_days)
+    for company in workable_companies or []:
+        listings += fetch_workable(company.strip(), limit_per_source, max_age_days)
     if "remoteok" in sources:
         listings += fetch_remoteok(limit_per_source, max_age_days)
     if "remotive" in sources:

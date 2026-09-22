@@ -14,7 +14,8 @@ you apply yourself.
   scored, and flagged explicitly if it looks garbled (common with multi-column layouts) or
   suspiciously short (a scanned image with no real text layer)
 - **Fetches live listings** from RemoteOK, We Work Remotely, Remotive, Arbeitnow, Jobicy, and any
-  Greenhouse/Lever company job board you name — only listings from the last 7 days
+  Greenhouse, Lever, Ashby, or Workable company job board you name — only listings from the last 7
+  days
 - **Scores every listing with Jev** for fit, seniority match, urgency, and scam/red-flag signals
 - **Compares your resume against each top match** (via Gemini, since this step needs an actual
   generative model — Jev only answers typed questions, it can't write free text) and shows only
@@ -98,4 +99,11 @@ offers a public API and scraping them violates their terms of service.
 | Arbeitnow | Public API |
 | Jobicy | Public API |
 | HN "Who is hiring" | Public Algolia API, optional |
-| Greenhouse / Lever | Any company slug you provide |
+| Greenhouse / Lever / Ashby / Workable | Any company slug you provide (find it in that company's own careers-page URL) |
+
+Adding another site: any company running its careers page on one of those four ATS platforms
+works out of the box — just type its slug into the matching field, no code change needed. A
+company on a different ATS (or a custom-built careers page) would need a new fetcher function in
+`fetch_jobs.py`, following the same pattern as `fetch_ashby`/`fetch_workable`, provided that
+platform has a public, unauthenticated JSON endpoint (scraping a page that isn't meant to be
+machine-read is out of scope, same reasoning as the LinkedIn/Indeed exclusion above).

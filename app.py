@@ -224,14 +224,16 @@ def fetch():
     sources = data.get("sources") or []
     greenhouse = [c for c in (data.get("greenhouse") or "").split(",") if c.strip()]
     lever = [c for c in (data.get("lever") or "").split(",") if c.strip()]
+    ashby = [c for c in (data.get("ashby") or "").split(",") if c.strip()]
+    workable = [c for c in (data.get("workable") or "").split(",") if c.strip()]
     limit_per_source = int(data.get("limit_per_source") or 50)
 
     if not profile:
         return jsonify({"error": "Enter your target role/skills first."}), 400
-    if not sources and not greenhouse and not lever:
+    if not sources and not greenhouse and not lever and not ashby and not workable:
         return jsonify({"error": "Pick at least one source or enter a company."}), 400
 
-    listings = fetch_all(sources, greenhouse, lever, limit_per_source)
+    listings = fetch_all(sources, greenhouse, lever, ashby, workable, limit_per_source)
     if not listings:
         return jsonify({"error": "No listings from the last 7 days came back. Try different sources/companies."}), 400
 

@@ -61,9 +61,10 @@
   #error { color: var(--danger); font-size: 14px; margin-top: 10px; display: none; }
   .checks { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
   .check { display: flex; align-items: center; gap: 6px; font-weight: 400; font-size: 14px; }
-  .company-row { display: flex; gap: 10px; margin-bottom: 4px; }
+  .company-row { display: flex; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
   .company-row input[type="text"] {
     flex: 1;
+    min-width: 160px;
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 8px 10px;
@@ -242,10 +243,12 @@
       <label class="check"><input type="checkbox" id="src-jobicy" checked> Jobicy</label>
       <label class="check"><input type="checkbox" id="src-hn"> HN "Who is hiring"</label>
     </div>
-    <div class="hint" style="margin-top:10px;">Optional: specific companies (comma-separated slugs)</div>
+    <div class="hint" style="margin-top:10px;">Optional: specific companies (comma-separated slugs, found in that company's careers-page URL) &mdash; any company on one of these four ATS platforms can be added this way, not just the ones on the checklist above</div>
     <div class="company-row">
       <input type="text" id="greenhouse" placeholder="Greenhouse companies, e.g. stripe,airbnb">
       <input type="text" id="lever" placeholder="Lever companies, e.g. netflix">
+      <input type="text" id="ashby" placeholder="Ashby companies, e.g. linear">
+      <input type="text" id="workable" placeholder="Workable companies, e.g. huggingface">
     </div>
     <button id="fetchBtn" onclick="fetchAndScore()">Fetch listings</button>
     <span id="fetchStatus" class="hint"></span>
@@ -345,6 +348,8 @@ async function fetchAndScore() {
   if (document.getElementById('src-hn').checked) sources.push('hn');
   const greenhouse = document.getElementById('greenhouse').value;
   const lever = document.getElementById('lever').value;
+  const ashby = document.getElementById('ashby').value;
+  const workable = document.getElementById('workable').value;
 
   const btn = document.getElementById('fetchBtn');
   const status = document.getElementById('fetchStatus');
@@ -362,7 +367,7 @@ async function fetchAndScore() {
     const resp = await fetch('/fetch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profile, sources, greenhouse, lever, limit_per_source: 50 }),
+      body: JSON.stringify({ profile, sources, greenhouse, lever, ashby, workable, limit_per_source: 50 }),
     });
     const data = await resp.json();
 
