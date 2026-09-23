@@ -61,10 +61,21 @@
   #error { color: var(--danger); font-size: 14px; margin-top: 10px; display: none; }
   .checks { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
   .check { display: flex; align-items: center; gap: 6px; font-weight: 400; font-size: 14px; }
-  .company-row { display: flex; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
-  .company-row input[type="text"] {
-    flex: 1;
-    min-width: 160px;
+  .company-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .company-field label {
+    display: block;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .company-field input[type="text"] {
+    width: 100%;
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 8px 10px;
@@ -210,6 +221,13 @@
     padding: 6px 12px;
     font-size: 12px;
   }
+  .empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 30px 10px;
+  }
 </style>
 </head>
 <body>
@@ -243,13 +261,28 @@
       <label class="check"><input type="checkbox" id="src-jobicy" checked> Jobicy</label>
       <label class="check"><input type="checkbox" id="src-hn"> HN "Who is hiring"</label>
     </div>
-    <div class="hint" style="margin-top:10px;">Optional: specific companies (comma-separated slugs, found in that company's careers-page URL) &mdash; any company on one of these four ATS platforms can be added this way, not just the ones on the checklist above</div>
-    <div class="company-row">
-      <input type="text" id="greenhouse" placeholder="Greenhouse companies, e.g. stripe,airbnb">
-      <input type="text" id="lever" placeholder="Lever companies, e.g. netflix">
-      <input type="text" id="ashby" placeholder="Ashby companies, e.g. linear">
-      <input type="text" id="workable" placeholder="Workable companies, e.g. huggingface">
-      <input type="text" id="recruitee" placeholder="Recruitee companies, e.g. anywhereworks">
+    <div class="hint" style="margin-top:10px;">Optional: add a specific company by the slug in its careers-page URL (comma-separated for more than one) &mdash; works for any company on these five ATS platforms, not just the aggregators above</div>
+    <div class="company-grid">
+      <div class="company-field">
+        <label for="greenhouse">Greenhouse</label>
+        <input type="text" id="greenhouse" placeholder="e.g. stripe, airbnb">
+      </div>
+      <div class="company-field">
+        <label for="lever">Lever</label>
+        <input type="text" id="lever" placeholder="e.g. netflix">
+      </div>
+      <div class="company-field">
+        <label for="ashby">Ashby</label>
+        <input type="text" id="ashby" placeholder="e.g. linear">
+      </div>
+      <div class="company-field">
+        <label for="workable">Workable</label>
+        <input type="text" id="workable" placeholder="e.g. huggingface">
+      </div>
+      <div class="company-field">
+        <label for="recruitee">Recruitee</label>
+        <input type="text" id="recruitee" placeholder="e.g. anywhereworks">
+      </div>
     </div>
     <button id="fetchBtn" onclick="fetchAndScore()">Fetch listings</button>
     <span id="fetchStatus" class="hint"></span>
@@ -429,6 +462,9 @@ async function fetchAndScore() {
       card.querySelector('.dismiss-btn').addEventListener('click', (e) => setListingStatus(e, 'dismissed'));
       grid.appendChild(card);
     });
+    if (data.results.length === 0) {
+      grid.innerHTML = '<div class="empty-state">No matches this time. Try a broader role description, different sources, or another company.</div>';
+    }
     const verifiedCount = data.count - data.unverified_count;
     let statusMsg = `${verifiedCount} of ${data.checked} checked actually matched your resume`;
     if (data.unverified_count > 0) {
